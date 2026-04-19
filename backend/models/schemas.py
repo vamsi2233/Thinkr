@@ -108,7 +108,7 @@ class AnalyzeGeneration(BaseModel):
 
 
 class ExpandGeneration(BaseModel):
-    children: List[GeneratedNodeDraft] = Field(default_factory=list, min_length=2, max_length=4)
+    children: List[GeneratedNodeDraft] = Field(default_factory=list, min_length=1, max_length=6)
 
 
 class ConversationMessage(BaseModel):
@@ -117,11 +117,27 @@ class ConversationMessage(BaseModel):
     content: str
 
 
+class BranchPreviewDraft(BaseModel):
+    """Structured next-branch options from chat (persisted with server-generated ids)."""
+
+    title: str = Field(min_length=1, max_length=200)
+    description: str = Field(min_length=1, max_length=900)
+    immediate_action: str = Field(default="", max_length=400)
+
+
+class BranchPreview(BaseModel):
+    id: str
+    title: str
+    description: str
+    immediate_action: Optional[str] = None
+
+
 class ConversationStateResponse(BaseModel):
     node: DecisionNode
     ancestor_context_summary: str
     messages: List[ConversationMessage] = Field(default_factory=list)
     suggested_perspectives: List[str] = Field(default_factory=list)
+    branch_previews: List[BranchPreview] = Field(default_factory=list)
 
 
 class ChatRequest(BaseModel):
@@ -132,6 +148,7 @@ class ChatRequest(BaseModel):
 class ChatGeneration(BaseModel):
     assistant_message: str
     suggested_perspectives: List[str] = Field(default_factory=list, max_length=4)
+    branch_previews: List[BranchPreviewDraft] = Field(default_factory=list, max_length=4)
 
 
 class ChatResponse(BaseModel):
@@ -139,15 +156,24 @@ class ChatResponse(BaseModel):
     ancestor_context_summary: str
     messages: List[ConversationMessage] = Field(default_factory=list)
     suggested_perspectives: List[str] = Field(default_factory=list)
+    branch_previews: List[BranchPreview] = Field(default_factory=list)
 
 
 class BranchConversationRequest(BaseModel):
     node_id: str
-    count: int = Field(default=4, ge=2, le=6)
+    count: int = Field(default=4, ge=1, le=6)
 
 
 class BranchConversationResponse(BaseModel):
     children: List[DecisionNode] = Field(default_factory=list)
+    message: Optional[str] = None
+    ancestor_context_summary: str
+
+
+class MaterializeBranchPreviewResponse(BaseModel):
+    node: DecisionNode
+    reused_existing: bool = False
+    branch_previews: List[BranchPreview] = Field(default_factory=list)
     message: Optional[str] = None
     ancestor_context_summary: str
 

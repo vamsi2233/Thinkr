@@ -69,18 +69,22 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp ../.env.example .env
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Create `backend/.env` only when you need LLM keys or overrides (see **Environment Rules** below).
 
 ### Frontend
 
 ```bash
 cd frontend
 npm install
-cp ../.env.example .env
 npm run dev
 ```
+
+`npm run dev` / `build` / `preview` use `../.tools/node/bin/node` with local Vite and TypeScript (repo-root `.tools` layout).
+
+`frontend/.env` is optional: the app defaults `VITE_API_BASE_URL` to `http://localhost:8000`. Use repo-root `.env.example` only as a reference if you want to override.
 
 Open `http://localhost:5173`.
 

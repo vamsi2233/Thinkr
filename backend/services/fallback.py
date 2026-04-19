@@ -4,7 +4,16 @@ import re
 import uuid
 from typing import List, Optional, Tuple
 
-from models.schemas import AnalyzeGeneration, ChatGeneration, ConversationMessage, DecisionNode, ExpandGeneration, GeneratedNodeDraft, QuickSummary
+from models.schemas import (
+    AnalyzeGeneration,
+    BranchPreviewDraft,
+    ChatGeneration,
+    ConversationMessage,
+    DecisionNode,
+    ExpandGeneration,
+    GeneratedNodeDraft,
+    QuickSummary,
+)
 
 
 def _normalize_title(text: str) -> str:
@@ -138,6 +147,24 @@ def build_fallback_expansion(parent: DecisionNode, context: str) -> ExpandGenera
     return ExpandGeneration(children=items)
 
 
+def draft_from_branch_preview_draft(preview: BranchPreviewDraft) -> GeneratedNodeDraft:
+    """Turn a persisted chat preview into a full node draft (scores are placeholders for compare / legacy)."""
+    action = (preview.immediate_action or "").strip() or "Define the next concrete step for this path."
+    return GeneratedNodeDraft(
+        title=_normalize_title(preview.title),
+        description=preview.description.strip(),
+        immediate_action=action,
+        short_term_outcome="You gain clarity on whether this direction fits your constraints and timing.",
+        long_term_outcome="This path either becomes your main bet or sharpens what to rule out next.",
+        risks=["Context may shift faster than the plan assumes", "Key assumptions still need validation"],
+        risk_score=5,
+        reward_score=6,
+        effort_score=5,
+        time_score=5,
+        uncertainty="Validate with real constraints, stakeholders, and a cheap experiment where possible.",
+    )
+
+
 def make_node_from_draft(draft: GeneratedNodeDraft, parent_id: Optional[str], depth: int) -> DecisionNode:
     return DecisionNode(
         id=str(uuid.uuid4()),
@@ -164,7 +191,8 @@ def build_ancestor_context_summary(lineage: List[DecisionNode]) -> str:
         if node.depth == 0:
             parts.append(f"Root problem: {node.description}")
         else:
-            parts.append(f"Depth {node.depth} - {node.title}: {node.description}")
+            # Tab separates title from description so titles may contain ": " without breaking parsers.
+            parts.append(f"Depth {node.depth} - {node.title}\t{node.description}")
     return "\n".join(parts)
 
 
@@ -181,7 +209,16 @@ def build_fallback_chat_response(node: DecisionNode, ancestor_context_summary: s
         "How would this look if we optimized for speed instead of certainty?",
         "What alternative perspective should we explore before branching?",
     ]
-    return ChatGeneration(assistant_message=assistant_message, suggested_perspectives=suggestions)
+    expand = build_fallback_branch_candidates(node, messages, 4)
+    branch_previews = [
+        BranchPreviewDraft(title=c.title, description=c.description, immediate_action=c.immediate_action)
+        for c in expand.children
+    ]
+    return ChatGeneration(
+        assistant_message=assistant_message,
+        suggested_perspectives=suggestions,
+        branch_previews=branch_previews,
+    )
 
 
 def build_fallback_seed_message(node: DecisionNode, ancestor_context_summary: str) -> ChatGeneration:
@@ -196,7 +233,16 @@ def build_fallback_seed_message(node: DecisionNode, ancestor_context_summary: st
         "What is the cheapest way to test this branch?",
         "What downside should we de-risk before committing?",
     ]
-    return ChatGeneration(assistant_message=assistant_message, suggested_perspectives=suggestions)
+    expand = build_fallback_branch_candidates(node, [], 4)
+    branch_previews = [
+        BranchPreviewDraft(title=c.title, description=c.description, immediate_action=c.immediate_action)
+        for c in expand.children
+    ]
+    return ChatGeneration(
+        assistant_message=assistant_message,
+        suggested_perspectives=suggestions,
+        branch_previews=branch_previews,
+    )
 
 
 def build_fallback_branch_candidates(node: DecisionNode, messages: List[ConversationMessage], count: int) -> ExpandGeneration:

@@ -6,7 +6,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env
-.env.example
 backend/.env
 .tools/
 frontend/.env

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Set
 
-from models.schemas import ConversationMessage, DecisionNode, SessionSummary
+from models.schemas import BranchPreview, BranchPreviewDraft, ConversationMessage, DecisionNode, SessionSummary
 
 
 def _utc_now() -> str:
@@ -89,6 +89,18 @@ class SQLiteDecisionStore:
                     PRIMARY KEY (node_id, position),
                     FOREIGN KEY(node_id) REFERENCES nodes(id) ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS branch_previews (
+                    id TEXT PRIMARY KEY,
+                    node_id TEXT NOT NULL,
+                    position INTEGER NOT NULL,
+                    title TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    immediate_action TEXT,
+                    FOREIGN KEY(node_id) REFERENCES nodes(id) ON DELETE CASCADE
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_branch_previews_node ON branch_previews(node_id, position);
                 """
             )
 
@@ -408,6 +420,69 @@ class SQLiteDecisionStore:
                     (node_id, index, suggestion),
                 )
             connection.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (_utc_now(), session_id))
+
+    def clear_branch_previews(self, node_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute("DELETE FROM branch_previews WHERE node_id = ?", (node_id,))
+
+    def set_branch_previews(self, node_id: str, previews: List[BranchPreviewDraft]) -> None:
+        session_id = self._ensure_active_session()
+        with self._connect() as connection:
+            connection.execute("DELETE FROM branch_previews WHERE node_id = ?", (node_id,))
+            for index, preview in enumerate(previews):
+                connection.execute(
+                    "INSERT INTO branch_previews (id, node_id, position, title, description, immediate_action) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        str(uuid.uuid4()),
+                        node_id,
+                        index,
+                        preview.title,
+                        preview.description,
+                        preview.immediate_action or None,
+                    ),
+                )
+            connection.execute("UPDATE sessions SET updated_at = ? WHERE id = ?", (_utc_now(), session_id))
+
+    def get_branch_previews(self, node_id: str) -> List[BranchPreview]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, title, description, immediate_action FROM branch_previews WHERE node_id = ? ORDER BY position ASC",
+                (node_id,),
+            ).fetchall()
+        return [
+            BranchPreview(
+                id=row["id"],
+                title=row["title"],
+                description=row["description"],
+                immediate_action=row["immediate_action"],
+            )
+            for row in rows
+        ]
+
+    def get_branch_preview(self, preview_id: str) -> Optional[BranchPreview]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT id, node_id, title, description, immediate_action FROM branch_previews WHERE id = ?",
+                (preview_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return BranchPreview(
+            id=row["id"],
+            title=row["title"],
+            description=row["description"],
+            immediate_action=row["immediate_action"],
+        )
+
+    def get_branch_preview_node_id(self, preview_id: str) -> Optional[str]:
+        with self._connect() as connection:
+            row = connection.execute("SELECT node_id FROM branch_previews WHERE id = ?", (preview_id,)).fetchone()
+        return row["node_id"] if row else None
+
+    def delete_branch_preview(self, preview_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute("DELETE FROM branch_previews WHERE id = ?", (preview_id,))
+            return cursor.rowcount > 0
 
     def get_root_node_id(self) -> Optional[str]:
         session_id = self._ensure_active_session()

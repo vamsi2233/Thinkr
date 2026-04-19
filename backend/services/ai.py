@@ -105,14 +105,14 @@ class DecisionAIService:
 
         system_prompt = (
             "You are Thinkr, a strategic decision tree planner. Generate the next possible steps for a selected branch. "
-            "Keep paths distinct, actionable, and non-duplicative. Always include uncertainty."
+            "Keep paths distinct, actionable, and non-duplicative. Each description must tie explicitly to the parent path and context (not generic advice). Always include uncertainty."
         )
         user_prompt = (
             f"Parent title: {node.title}\n"
             f"Parent description: {node.description}\n"
-            f"Context: {context}\n\n"
-            "For this decision path, generate next possible steps. For each include immediate action, short-term outcome, "
-            "long-term consequence, risks, and scores for risk, reward, effort, and time. Return JSON only."
+            f"Context from root to here: {context}\n\n"
+            "For this decision path, generate next possible steps. For each include: title, description (1–3 sentences, contextual), "
+            "immediate action, short-term outcome, long-term consequence, risks, and scores for risk, reward, effort, and time. Return JSON only."
         )
         return self._parse_response(ExpandGeneration, system_prompt, user_prompt, fallback)
 
@@ -165,7 +165,10 @@ class DecisionAIService:
             "Answer the user's latest question directly first, then deepen the reasoning with concrete options, tradeoffs, and next steps. "
             "Ask a clarifying question only when it meaningfully improves the advice. "
             "Avoid fake certainty, generic filler, and repeated phrasing. "
-            "Suggest up to 4 alternate perspectives, but do not create branches automatically."
+            "Suggest up to 4 alternate perspectives (short follow-up prompts). "
+            "Also propose up to 4 branch_previews: concrete NEXT child branches the user could open from this node. "
+            "Each branch_preview must have title, description (1–3 sentences tying back to ancestor context and the latest user turn), "
+            "and immediate_action (one concrete next step). Order branch_previews best-first. Do not create branches automatically."
         )
 
         conversation_lines = [f"{message.role.upper()}: {message.content}" for message in messages[-12:]]
@@ -190,7 +193,10 @@ class DecisionAIService:
             "Write the first assistant message for that branch. "
             "Explain what this branch means in practical terms, what assumption it is making, and what to examine next. "
             "Sound natural, thoughtful, and specific. Do not say that this message was auto-generated. "
-            "Suggest up to 4 useful follow-up angles, but do not create branches automatically."
+            "Suggest up to 4 useful follow-up angles (suggested_perspectives). "
+            "Also propose up to 4 branch_previews: distinct next child branches they could explore from this node, "
+            "each with title, description (1–3 sentences grounded in ancestor context and this node's meaning), and immediate_action. "
+            "Order branch_previews best-first."
         )
         user_prompt = (
             f"Ancestor context from root to current node:\n{ancestor_context_summary}\n\n"
@@ -218,8 +224,8 @@ class DecisionAIService:
         conversation_lines = [f"{message.role.upper()}: {message.content}" for message in messages[-12:]]
         system_prompt = (
             "You are Thinkr, a strategic planner. Based on the conversation and ancestor context, create distinct branch candidates. "
-            "Each branch should be a short clean summary suitable for a graph node, while richer reasoning remains in chat. "
-            "Only create top branches that the user has implicitly or explicitly asked to explore."
+            "Each branch needs a graph-ready title and a description of 1–3 sentences that explicitly references the user's situation and constraints. "
+            "Only propose branches the user has implicitly or explicitly opened the door to explore."
         )
         user_prompt = (
             f"Ancestor context from root to current node:\n{ancestor_context_summary}\n\n"

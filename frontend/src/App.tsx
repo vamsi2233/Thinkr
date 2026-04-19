@@ -13,6 +13,7 @@ import { useThinkr } from './hooks/useThinkr';
 import type { DecisionFlowNode } from './types';
 
 function App() {
+  const [nodePositions, setNodePositions] = useState<Record<string, XYPosition>>({});
   const {
     problem,
     setProblem,
@@ -53,8 +54,11 @@ function App() {
     startNewSession,
     switchSession,
     deleteSelectedSession,
-  } = useThinkr();
-  const [nodePositions, setNodePositions] = useState<Record<string, XYPosition>>({});
+    materializeFromPreview,
+    materializingPreviewId,
+    ensureConversationForGraph,
+    branchPreviewsForSelected,
+  } = useThinkr({ onAfterGraphStructureChange: () => setNodePositions({}) });
 
   const handleSelectNode = useCallback(
     (nodeId: string) => {
@@ -88,6 +92,13 @@ function App() {
       return nextEntries.length === Object.keys(current).length ? current : Object.fromEntries(nextEntries);
     });
   }, [nodes]);
+
+  useEffect(() => {
+    if (viewMode !== 'graph' || !selectedNodeId) {
+      return;
+    }
+    void ensureConversationForGraph(selectedNodeId);
+  }, [viewMode, selectedNodeId, ensureConversationForGraph]);
 
   const hiddenNodeIds = useMemo(() => hiddenDescendants(nodes, collapsedNodeIds), [nodes, collapsedNodeIds]);
 
@@ -140,7 +151,7 @@ function App() {
       </a>
       <main
         id="thinkr-main"
-        className="aurora-shell mx-auto flex min-h-screen max-w-[1680px] flex-col gap-5 px-4 py-5 sm:gap-6 sm:px-6 sm:py-6 lg:gap-7 lg:px-8"
+        className="aurora-shell mx-auto flex min-h-screen w-full min-w-0 max-w-[1940px] flex-col gap-5 px-4 py-5 sm:gap-6 sm:px-6 sm:py-6 lg:gap-7 lg:px-8 xl:px-10"
       >
         <header
           className="surface-panel flex flex-col gap-5 p-5 sm:flex-row sm:items-start sm:justify-between sm:p-6"
@@ -236,11 +247,18 @@ function App() {
         )}
 
         <section
-          className="grid gap-5 lg:gap-6 xl:grid-cols-[minmax(280px,340px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(300px,360px)_minmax(0,1fr)]"
+          className="grid gap-5 lg:gap-6 xl:grid-cols-[minmax(280px,392px)_minmax(0,1fr)] 2xl:grid-cols-[minmax(300px,432px)_minmax(0,1fr)]"
           aria-label="Decision workspace"
         >
           <aside className="flex flex-col gap-5 lg:gap-6 xl:sticky xl:top-6 xl:self-start">
-            <DecisionDetailsPanel node={selectedNode} isLoading={isAnalyzing || isConversationLoading} className="hidden xl:block" />
+            <DecisionDetailsPanel
+              node={selectedNode}
+              isLoading={isAnalyzing || isConversationLoading}
+              className="hidden xl:block"
+              branchPreviews={branchPreviewsForSelected}
+              materializingPreviewId={materializingPreviewId}
+              onMaterializePreview={materializeFromPreview}
+            />
             <ComparisonPanel selectedNodes={selectedCompareNodes} comparison={comparison} isLoading={isComparing} />
           </aside>
 

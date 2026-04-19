@@ -1,7 +1,32 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { activateSession as requestActivateSession, analyzeProblem, branchFromChat, compareDecisionNodes, createNewSession as requestNewSession, deleteSession as requestDeleteSession, getActiveSession, getConversation, getHealth, listSessions, sendChatMessage } from '../api/client';
-import type { ComparisonResult, ConversationMessage, DecisionNode, HealthResponse, QuickSummary, SessionSummary } from '../types';
+import {
+  activateSession as requestActivateSession,
+  analyzeProblem,
+  branchFromChat,
+  compareDecisionNodes,
+  createNewSession as requestNewSession,
+  deleteSession as requestDeleteSession,
+  getActiveSession,
+  getConversation,
+  getHealth,
+  listSessions,
+  materializeBranchPreview,
+  sendChatMessage,
+} from '../api/client';
+import type {
+  BranchPreview,
+  ComparisonResult,
+  ConversationMessage,
+  DecisionNode,
+  HealthResponse,
+  QuickSummary,
+  SessionSummary,
+} from '../types';
+
+export interface UseThinkrOptions {
+  onAfterGraphStructureChange?: () => void;
+}
 
 type ViewMode = 'graph' | 'chat';
 
@@ -9,12 +34,14 @@ interface ConversationCacheEntry {
   ancestorContextSummary: string;
   messages: ConversationMessage[];
   suggestedPerspectives: string[];
+  branchPreviews: BranchPreview[];
 }
 
 interface ConversationPayload {
   ancestor_context_summary: string;
   messages: ConversationMessage[];
   suggested_perspectives: string[];
+  branch_previews?: BranchPreview[];
 }
 
 function mergeNodes(existing: DecisionNode[], incoming: DecisionNode[]): DecisionNode[] {
@@ -42,7 +69,7 @@ function attachChildren(existing: DecisionNode[], parentId: string, children: De
   );
 }
 
-export function useThinkr() {
+export function useThinkr(options?: UseThinkrOptions) {
   const [problem, setProblem] = useState('Should I expand my business to a new city?');
   const [nodes, setNodes] = useState<DecisionNode[]>([]);
   const [summary, setSummary] = useState<QuickSummary | null>(null);
@@ -62,6 +89,7 @@ export function useThinkr() {
   const [isConversationLoading, setIsConversationLoading] = useState(false);
   const [isSendingChat, setIsSendingChat] = useState(false);
   const [isBranchingFromChat, setIsBranchingFromChat] = useState(false);
+  const [materializingPreviewId, setMaterializingPreviewId] = useState<string | null>(null);
   const [isStartingNewSession, setIsStartingNewSession] = useState(false);
   const [isSwitchingSession, setIsSwitchingSession] = useState(false);
   const [isDeletingSession, setIsDeletingSession] = useState(false);
@@ -74,17 +102,24 @@ export function useThinkr() {
   const activeChatNode = activeChatNodeId ? nodeMap.get(activeChatNodeId) ?? null : null;
   const activeConversation = activeChatNodeId ? conversationCache[activeChatNodeId] ?? null : null;
   const rootNode = useMemo(() => nodes.find((node) => node.depth === 0) ?? null, [nodes]);
+  const branchPreviewsForSelected = useMemo(() => {
+    if (!selectedNodeId) {
+      return [];
+    }
+    return conversationCache[selectedNodeId]?.branchPreviews ?? [];
+  }, [selectedNodeId, conversationCache]);
 
-  const cacheConversation = (nodeId: string, payload: ConversationPayload) => {
+  const cacheConversation = useCallback((nodeId: string, payload: ConversationPayload) => {
     setConversationCache((current) => ({
       ...current,
       [nodeId]: {
         ancestorContextSummary: payload.ancestor_context_summary,
         messages: payload.messages,
         suggestedPerspectives: payload.suggested_perspectives,
+        branchPreviews: payload.branch_previews ?? [],
       },
     }));
-  };
+  }, []);
 
   const refreshSessions = async () => {
     const response = await listSessions();
@@ -220,6 +255,56 @@ export function useThinkr() {
     });
   };
 
+  const materializeFromPreview = async (previewId: string, parentNodeId: string) => {
+    setMaterializingPreviewId(previewId);
+    setErrorMessage(null);
+    try {
+      const response = await materializeBranchPreview(previewId);
+      if (!response.reused_existing) {
+        setNodes((current) => attachChildren(current, parentNodeId, [response.node]));
+      }
+      setConversationCache((current) => {
+        const prev = current[parentNodeId] ?? {
+          ancestorContextSummary: response.ancestor_context_summary,
+          messages: [],
+          suggestedPerspectives: [],
+          branchPreviews: [],
+        };
+        return {
+          ...current,
+          [parentNodeId]: {
+            ...prev,
+            branchPreviews: response.branch_previews,
+          },
+        };
+      });
+      setSelectedNodeId(response.node.id);
+      setCollapsedNodeIds((current) => {
+        const next = new Set(current);
+        next.delete(parentNodeId);
+        return next;
+      });
+      options?.onAfterGraphStructureChange?.();
+      setStatusMessage(response.message ?? null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to create that branch right now.');
+    } finally {
+      setMaterializingPreviewId(null);
+    }
+  };
+
+  const ensureConversationForGraph = useCallback(
+    async (nodeId: string) => {
+      try {
+        const response = await getConversation(nodeId);
+        cacheConversation(nodeId, response);
+      } catch {
+        /* panel can stay empty */
+      }
+    },
+    [cacheConversation],
+  );
+
   const sendMessage = async (message: string) => {
     if (!activeChatNodeId || !message.trim()) {
       return;
@@ -255,6 +340,7 @@ export function useThinkr() {
           next.delete(activeChatNodeId);
           return next;
         });
+        options?.onAfterGraphStructureChange?.();
       }
       setStatusMessage(response.message ?? 'Branches created from the conversation.');
     } catch (error) {
@@ -283,6 +369,7 @@ export function useThinkr() {
           next.delete(targetNodeId);
           return next;
         });
+        options?.onAfterGraphStructureChange?.();
         setStatusMessage(response.message ?? 'Top branches created.');
       } else {
         setStatusMessage(response.message ?? 'No branches were created.');
@@ -519,5 +606,9 @@ export function useThinkr() {
     startNewSession,
     switchSession,
     deleteSelectedSession,
+    materializeFromPreview,
+    materializingPreviewId,
+    ensureConversationForGraph,
+    branchPreviewsForSelected,
   };
 }

@@ -9,6 +9,15 @@ const nodeTypes = {
   decisionNode: DecisionNodeCard,
 };
 
+/** Matches card depth tints: indigo anchor → mint → lilac → peach. */
+function minimapNodeColor(node: { data?: unknown }): string {
+  const depth = (node as DecisionFlowNode).data?.node?.depth ?? 0;
+  if (depth === 0) {
+    return '#818cf8';
+  }
+  return ['#34d399', '#a78bfa', '#fb923c'][(depth - 1) % 3];
+}
+
 function FitViewOnChange({ nodeCount }: { nodeCount: number }) {
   const reactFlow = useReactFlow();
 
@@ -79,24 +88,49 @@ export function DecisionTree({ nodes, edges, isLoading = false, onNodesChange }:
         ) : null}
 
         <ReactFlowProvider>
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            nodeTypes={nodeTypes}
-            fitView
-            proOptions={{ hideAttribution: true }}
-            nodesDraggable
-            nodesConnectable={false}
-            elementsSelectable={false}
-            minZoom={0.2}
-            maxZoom={1.7}
-          >
-            <FitViewOnChange nodeCount={nodes.length} />
-            <MiniMap pannable zoomable className="!rounded-xl !border !border-border !shadow-sm" style={{ background: 'rgba(255,255,255,0.92)' }} nodeColor={() => '#3b82f6'} />
-            <Controls position="bottom-right" />
-            <Background gap={24} size={1} color="rgba(100, 116, 139, 0.18)" />
-          </ReactFlow>
+          <div className="relative h-full w-full min-h-[200px] overflow-hidden">
+            <div
+              className="pointer-events-none absolute inset-0 bg-gradient-to-br from-violet-100/45 via-sky-50/65 to-teal-100/40"
+              aria-hidden
+            />
+            <div
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_85%_55%_at_50%_-5%,rgba(129,140,248,0.14),transparent_58%),radial-gradient(ellipse_70%_50%_at_95%_100%,rgba(34,211,238,0.12),transparent_52%)]"
+              aria-hidden
+            />
+            <div
+              className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_0%,rgba(15,23,42,0.03)_52%,rgba(15,23,42,0.085)_100%)]"
+              aria-hidden
+            />
+            <ReactFlow
+              className="relative z-[1] h-full w-full !bg-transparent"
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              nodeTypes={nodeTypes}
+              fitView
+              proOptions={{ hideAttribution: true }}
+              nodesDraggable
+              nodesConnectable={false}
+              elementsSelectable={false}
+              minZoom={0.2}
+              maxZoom={1.7}
+            >
+              <FitViewOnChange nodeCount={nodes.length} />
+              <MiniMap
+                pannable
+                zoomable
+                className="!rounded-xl !border !border-indigo-200/70 !shadow-md"
+                style={{
+                  background: 'linear-gradient(155deg, rgba(237, 233, 254, 0.94), rgba(224, 242, 254, 0.9))',
+                }}
+                nodeStrokeWidth={2}
+                nodeColor={minimapNodeColor}
+                maskColor="rgba(15, 23, 42, 0.11)"
+              />
+              <Controls position="bottom-right" />
+              <Background gap={20} size={1} color="rgba(51, 65, 85, 0.26)" />
+            </ReactFlow>
+          </div>
         </ReactFlowProvider>
       </div>
     </section>

@@ -2,48 +2,53 @@ import type { Edge } from '@xyflow/react';
 
 import type { DecisionNode } from '../types';
 
-const HORIZONTAL_GAP = 320;
-const VERTICAL_GAP = 220;
+const HORIZONTAL_GAP = 340;
+const VERTICAL_GAP = 360;
 
+/**
+ * Hierarchical layout: leaves packed left-to-right with fixed horizontal gap;
+ * each parent is centered over its subtree. Children are ordered by id for stability.
+ */
 export function layoutDecisionTree(nodes: DecisionNode[]): Map<string, { x: number; y: number }> {
-  const nodeMap = new Map(nodes.map((node) => [node.id, node]));
-  const childrenByParent = new Map<string, DecisionNode[]>();
+  const positions = new Map<string, { x: number; y: number }>();
+  const childrenByParent = new Map<string | null, DecisionNode[]>();
 
   nodes.forEach((node) => {
-    if (!node.parent_id) {
-      return;
-    }
-
-    const siblings = childrenByParent.get(node.parent_id) ?? [];
+    const parentKey = node.parent_id ?? null;
+    const siblings = childrenByParent.get(parentKey) ?? [];
     siblings.push(node);
-    childrenByParent.set(node.parent_id, siblings);
+    childrenByParent.set(parentKey, siblings);
   });
 
-  const root = nodes.find((node) => node.parent_id === null);
-  const positions = new Map<string, { x: number; y: number }>();
+  for (const [, siblings] of childrenByParent) {
+    siblings.sort((a, b) => a.id.localeCompare(b.id));
+  }
 
+  const root = nodes.find((node) => node.parent_id === null);
   if (!root) {
     return positions;
   }
 
-  let leafIndex = 0;
+  let leafCursor = 0;
 
-  const visit = (nodeId: string, depth: number): number => {
+  const layoutSubtree = (nodeId: string, depth: number): { minX: number; maxX: number } => {
     const children = childrenByParent.get(nodeId) ?? [];
     if (children.length === 0) {
-      const x = leafIndex * HORIZONTAL_GAP;
+      const x = leafCursor * HORIZONTAL_GAP;
+      leafCursor += 1;
       positions.set(nodeId, { x, y: depth * VERTICAL_GAP });
-      leafIndex += 1;
-      return x;
+      return { minX: x, maxX: x };
     }
 
-    const childXs = children.map((child) => visit(child.id, depth + 1));
-    const x = (Math.min(...childXs) + Math.max(...childXs)) / 2;
-    positions.set(nodeId, { x, y: depth * VERTICAL_GAP });
-    return x;
+    const ranges = children.map((child) => layoutSubtree(child.id, depth + 1));
+    const minX = Math.min(...ranges.map((r) => r.minX));
+    const maxX = Math.max(...ranges.map((r) => r.maxX));
+    const centerX = (minX + maxX) / 2;
+    positions.set(nodeId, { x: centerX, y: depth * VERTICAL_GAP });
+    return { minX, maxX };
   };
 
-  visit(root.id, 0);
+  layoutSubtree(root.id, 0);
 
   nodes.forEach((node) => {
     if (!positions.has(node.id)) {
@@ -65,10 +70,10 @@ export function buildEdges(nodes: DecisionNode[], hiddenNodeIds: Set<string>): E
       animated: !hiddenNodeIds.has(node.id),
       hidden: hiddenNodeIds.has(node.id) || hiddenNodeIds.has(node.parent_id as string),
       style: {
-        stroke: '#8fb8ff',
-        strokeWidth: 1.8,
-        filter: 'drop-shadow(0 0 4px rgba(91, 154, 245, 0.28))',
-        opacity: 0.85,
+        stroke: '#8f9dff',
+        strokeWidth: 2,
+        filter: 'drop-shadow(0 0 5px rgba(99, 102, 241, 0.32))',
+        opacity: 0.9,
       },
     }));
 }

@@ -71,11 +71,19 @@ export interface ConversationMessage {
   content: string;
 }
 
+export interface BranchPreview {
+  id: string;
+  title: string;
+  description: string;
+  immediate_action?: string | null;
+}
+
 export interface ConversationStateResponse {
   node: DecisionNode;
   ancestor_context_summary: string;
   messages: ConversationMessage[];
   suggested_perspectives: string[];
+  branch_previews: BranchPreview[];
 }
 
 export interface ChatResponse {
@@ -83,6 +91,15 @@ export interface ChatResponse {
   ancestor_context_summary: string;
   messages: ConversationMessage[];
   suggested_perspectives: string[];
+  branch_previews: BranchPreview[];
+}
+
+export interface MaterializeBranchPreviewResponse {
+  node: DecisionNode;
+  reused_existing: boolean;
+  branch_previews: BranchPreview[];
+  message?: string | null;
+  ancestor_context_summary: string;
 }
 
 export interface BranchConversationResponse {

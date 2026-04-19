@@ -6,6 +6,7 @@ import type {
   ConversationStateResponse,
   ExpandResponse,
   HealthResponse,
+  MaterializeBranchPreviewResponse,
   NewSessionResponse,
   SessionListResponse,
   SessionStateResponse,
@@ -111,5 +112,12 @@ export function branchFromChat(nodeId: string, count = 4): Promise<BranchConvers
   return request<BranchConversationResponse>('/branch-from-chat', {
     method: 'POST',
     body: JSON.stringify({ node_id: nodeId, count }),
+  });
+}
+
+export function materializeBranchPreview(previewId: string): Promise<MaterializeBranchPreviewResponse> {
+  return request<MaterializeBranchPreviewResponse>(`/branch-preview/${encodeURIComponent(previewId)}/materialize`, {
+    method: 'POST',
+    body: JSON.stringify({}),
   });
 }

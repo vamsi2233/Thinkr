@@ -52,6 +52,8 @@ body {
 
 #root {
   min-height: 100vh;
+  width: 100%;
+  min-width: 0;
 }
 
 ::selection {
@@ -240,11 +242,27 @@ input {
   overflow: hidden;
 }
 
+/*
+ * Decision tree glass — “aurora / mind-map” level tints (lavender anchor → mint → lilac → peach),
+ * inspired by common level-based map themes (cool progression + warm accent for rhythm).
+ * Stays translucent so backdrop blur reads.
+ */
 .glass-node-card {
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.82) 0%, rgba(248, 250, 255, 0.68) 100%);
-  box-shadow: 0 8px 24px rgba(59, 99, 160, 0.08), var(--glass-shine);
-  backdrop-filter: blur(18px) saturate(150%);
-  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  isolation: isolate;
+  background: linear-gradient(
+    168deg,
+    rgba(224, 242, 254, 0.38) 0%,
+    rgba(199, 210, 254, 0.26) 45%,
+    rgba(240, 249, 255, 0.4) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.78),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.06),
+    0 14px 40px rgba(15, 23, 42, 0.1),
+    0 4px 14px rgba(99, 102, 241, 0.09),
+    var(--glass-shine);
+  backdrop-filter: blur(28px) saturate(200%);
+  -webkit-backdrop-filter: blur(28px) saturate(200%);
 }
 
 .glass-node-card::after {
@@ -253,16 +271,65 @@ input {
   inset: 0;
   pointer-events: none;
   border-radius: inherit;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.35), transparent 40%, transparent 65%, rgba(59, 130, 246, 0.05));
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.45) 0%,
+    transparent 36%,
+    transparent 52%,
+    rgba(167, 139, 250, 0.14) 70%,
+    rgba(56, 189, 248, 0.12) 100%
+  );
+}
+
+/* Root: lavender / periwinkle anchor (ConfMap-style “level 0” cool anchor). */
+.glass-node-card.decision-node-depth-root {
+  background: linear-gradient(
+    168deg,
+    rgba(238, 242, 255, 0.62) 0%,
+    rgba(199, 210, 254, 0.45) 38%,
+    rgba(224, 231, 255, 0.52) 100%
+  );
+}
+
+/* Mint / aqua — fresh step down the tree. */
+.glass-node-card.decision-node-depth-1 {
+  background: linear-gradient(
+    168deg,
+    rgba(236, 253, 245, 0.55) 0%,
+    rgba(167, 243, 208, 0.42) 40%,
+    rgba(204, 251, 241, 0.48) 100%
+  );
+}
+
+/* Soft lilac / violet — depth without going dark. */
+.glass-node-card.decision-node-depth-2 {
+  background: linear-gradient(
+    168deg,
+    rgba(250, 245, 255, 0.58) 0%,
+    rgba(221, 214, 254, 0.46) 42%,
+    rgba(237, 233, 254, 0.52) 100%
+  );
+}
+
+/* Warm peach — alternates against cool levels (mind-map rhythm). */
+.glass-node-card.decision-node-depth-3 {
+  background: linear-gradient(
+    168deg,
+    rgba(255, 247, 237, 0.58) 0%,
+    rgba(254, 215, 170, 0.44) 42%,
+    rgba(255, 237, 213, 0.52) 100%
+  );
 }
 
 .node-card-glow::before {
   content: '';
   position: absolute;
   inset: -100% auto auto -28%;
-  width: 160px;
-  height: 160px;
-  background: radial-gradient(circle, rgba(96, 165, 250, 0.12), transparent 72%);
+  width: 180px;
+  height: 180px;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(167, 139, 250, 0.22), transparent 58%),
+    radial-gradient(circle at 90% 20%, rgba(34, 211, 238, 0.18), transparent 55%);
   pointer-events: none;
 }
 
@@ -325,8 +392,8 @@ input {
 
 .react-flow__edge.selected .react-flow__edge-path,
 .react-flow__edge:hover .react-flow__edge-path {
-  stroke: var(--accent);
-  filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.35));
+  stroke: #6366f1;
+  filter: drop-shadow(0 0 7px rgba(99, 102, 241, 0.4));
 }
 
 .skeleton-shimmer {

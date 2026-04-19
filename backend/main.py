@@ -12,6 +12,7 @@ from models.schemas import (
     AnalyzeResponse,
     BranchConversationRequest,
     BranchConversationResponse,
+    BranchPreviewDraft,
     ChatRequest,
     ChatResponse,
     CompareRequest,
@@ -20,6 +21,7 @@ from models.schemas import (
     DecisionNode,
     ExpandRequest,
     ExpandResponse,
+    MaterializeBranchPreviewResponse,
     ActivateSessionResponse,
     DeleteSessionResponse,
     NewSessionResponse,
@@ -28,13 +30,18 @@ from models.schemas import (
 )
 from services.ai import DecisionAIService
 from services.config import load_thinkr_env
-from services.fallback import build_ancestor_context_summary, make_node_from_draft
+from services.fallback import build_ancestor_context_summary, draft_from_branch_preview_draft, make_node_from_draft
 from services.store import SQLiteDecisionStore
 
 load_thinkr_env()
 
 MAX_DEPTH = 5
 MAX_NODES_PER_TREE = int(os.getenv("THINKR_MAX_NODES", "40"))
+MAX_SIBLINGS_PER_NODE = int(os.getenv("THINKR_MAX_SIBLINGS", "12"))
+
+
+def _title_key(title: str) -> str:
+    return " ".join(title.strip().casefold().split())
 
 app = FastAPI(title="Thinkr API", version="0.1.0")
 app.add_middleware(
@@ -50,22 +57,24 @@ ai_service = DecisionAIService()
 
 
 def _build_root_node(problem: str) -> DecisionNode:
+    raw = problem.strip()
+    title = raw if len(raw) <= 88 else f"{raw[:85]}…"
     return DecisionNode(
         id=str(uuid.uuid4()),
         parent_id=None,
-        title="Decision Root",
-        description=problem.strip(),
+        title=title or "Your decision",
+        description=raw,
         depth=0,
         risk_score=0,
         reward_score=0,
         effort_score=0,
         time_score=0,
         children=[],
-        immediate_action="Clarify the goal and evaluate strategic paths.",
-        short_term_outcome="You organize the decision into comparable branches.",
-        long_term_outcome="You create a reusable map of options instead of relying on a single guess.",
-        risks=["Initial branches may still need refinement"],
-        uncertainty="This root node is a framing tool, not the answer itself.",
+        immediate_action="Frame the goal, constraints, and what “good” looks like before branching.",
+        short_term_outcome="You align on the real decision and what evidence would change your mind.",
+        long_term_outcome="You build a reusable map of options instead of betting on a single guess.",
+        risks=["Early framing may still need refinement as you learn"],
+        uncertainty="The root anchors the problem; answers live in branches and chat.",
     )
 
 
@@ -203,6 +212,7 @@ def get_conversation(node_id: str) -> ConversationStateResponse:
         generation = ai_service.seed_node_conversation(node, ancestor_summary)
         store.add_message(node_id, "assistant", generation.assistant_message)
         store.set_suggested_perspectives(node_id, generation.suggested_perspectives)
+        store.set_branch_previews(node_id, generation.branch_previews)
         messages = store.get_messages(node_id)
     else:
         ancestor_summary = _ancestor_context_summary(node_id)
@@ -212,6 +222,7 @@ def get_conversation(node_id: str) -> ConversationStateResponse:
         ancestor_context_summary=ancestor_summary,
         messages=messages,
         suggested_perspectives=store.get_suggested_perspectives(node_id),
+        branch_previews=store.get_branch_previews(node_id),
     )
 
 
@@ -221,18 +232,21 @@ def chat(payload: ChatRequest) -> ChatResponse:
     if not node:
         raise HTTPException(status_code=404, detail="Node not found")
 
+    store.clear_branch_previews(payload.node_id)
     store.add_message(payload.node_id, "user", payload.message)
     ancestor_summary = _ancestor_context_summary(payload.node_id)
     messages = store.get_messages(payload.node_id)
     generation = ai_service.chat_on_node(node, ancestor_summary, messages)
     store.add_message(payload.node_id, "assistant", generation.assistant_message)
     store.set_suggested_perspectives(payload.node_id, generation.suggested_perspectives)
+    store.set_branch_previews(payload.node_id, generation.branch_previews)
 
     return ChatResponse(
         node=node,
         ancestor_context_summary=ancestor_summary,
         messages=store.get_messages(payload.node_id),
         suggested_perspectives=generation.suggested_perspectives,
+        branch_previews=store.get_branch_previews(payload.node_id),
     )
 
 
@@ -250,15 +264,17 @@ def branch_from_chat(payload: BranchConversationRequest) -> BranchConversationRe
         )
 
     existing_children = store.get_children(node.id)
-    if existing_children:
+    slots = MAX_SIBLINGS_PER_NODE - len(existing_children)
+    ancestor_summary = _ancestor_context_summary(payload.node_id)
+
+    if slots <= 0:
         return BranchConversationResponse(
-            children=existing_children,
-            message="This node already has child branches.",
-            ancestor_context_summary=_ancestor_context_summary(payload.node_id),
+            children=[],
+            message="Maximum child branches for this node is reached.",
+            ancestor_context_summary=ancestor_summary,
         )
 
     problem = store.problem_for_node(node.id)
-    ancestor_summary = _ancestor_context_summary(payload.node_id)
     if problem and store.total_nodes_for_problem(problem) >= MAX_NODES_PER_TREE:
         return BranchConversationResponse(
             children=[],
@@ -266,13 +282,98 @@ def branch_from_chat(payload: BranchConversationRequest) -> BranchConversationRe
             ancestor_context_summary=ancestor_summary,
         )
 
+    count = min(payload.count, slots)
+    if count < 1:
+        return BranchConversationResponse(
+            children=[],
+            message="No room for additional child branches on this node.",
+            ancestor_context_summary=ancestor_summary,
+        )
+
     messages = store.get_messages(node.id)
-    generation = ai_service.branch_from_conversation(node, ancestor_summary, messages, payload.count)
+    generation = ai_service.branch_from_conversation(node, ancestor_summary, messages, count)
     children = [make_node_from_draft(draft, node.id, node.depth + 1) for draft in generation.children]
     store.append_children(node.id, children)
 
     return BranchConversationResponse(
         children=children,
         message=f"Created {len(children)} branches from the conversation.",
+        ancestor_context_summary=ancestor_summary,
+    )
+
+
+@app.post("/branch-preview/{preview_id}/materialize", response_model=MaterializeBranchPreviewResponse)
+def materialize_branch_preview(preview_id: str) -> MaterializeBranchPreviewResponse:
+    parent_node_id = store.get_branch_preview_node_id(preview_id)
+    if not parent_node_id:
+        raise HTTPException(status_code=404, detail="Branch preview not found")
+
+    preview = store.get_branch_preview(preview_id)
+    if not preview:
+        raise HTTPException(status_code=404, detail="Branch preview not found")
+
+    parent = store.get_node(parent_node_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent node not found")
+
+    ancestor_summary = _ancestor_context_summary(parent_node_id)
+
+    if parent.depth >= MAX_DEPTH:
+        return MaterializeBranchPreviewResponse(
+            node=parent,
+            reused_existing=False,
+            branch_previews=store.get_branch_previews(parent_node_id),
+            message="Maximum depth reached for this branch.",
+            ancestor_context_summary=ancestor_summary,
+        )
+
+    existing_children = store.get_children(parent.id)
+    if len(existing_children) >= MAX_SIBLINGS_PER_NODE:
+        return MaterializeBranchPreviewResponse(
+            node=parent,
+            reused_existing=False,
+            branch_previews=store.get_branch_previews(parent_node_id),
+            message="Maximum child branches for this node is reached.",
+            ancestor_context_summary=ancestor_summary,
+        )
+
+    problem = store.problem_for_node(parent.id)
+    if problem and store.total_nodes_for_problem(problem) >= MAX_NODES_PER_TREE:
+        return MaterializeBranchPreviewResponse(
+            node=parent,
+            reused_existing=False,
+            branch_previews=store.get_branch_previews(parent_node_id),
+            message="Tree node limit reached.",
+            ancestor_context_summary=ancestor_summary,
+        )
+
+    key = _title_key(preview.title)
+    for child in existing_children:
+        if _title_key(child.title) == key:
+            store.delete_branch_preview(preview_id)
+            return MaterializeBranchPreviewResponse(
+                node=child,
+                reused_existing=True,
+                branch_previews=store.get_branch_previews(parent_node_id),
+                message="A branch with this title already exists; opened the existing node.",
+                ancestor_context_summary=ancestor_summary,
+            )
+
+    draft = draft_from_branch_preview_draft(
+        BranchPreviewDraft(
+            title=preview.title,
+            description=preview.description,
+            immediate_action=preview.immediate_action or "",
+        )
+    )
+    new_node = make_node_from_draft(draft, parent.id, parent.depth + 1)
+    store.append_children(parent.id, [new_node])
+    store.delete_branch_preview(preview_id)
+
+    return MaterializeBranchPreviewResponse(
+        node=new_node,
+        reused_existing=False,
+        branch_previews=store.get_branch_previews(parent_node_id),
+        message="Branch created from suggestion.",
         ancestor_context_summary=ancestor_summary,
     )
